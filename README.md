@@ -1,7 +1,10 @@
 <div align="center">
 
 # Sparrow
-English | [中文](README_zh-CN.md)
+
+麻雀虽小 五脏俱全
+
+ Small as it is, the sparrow has all the vital organs
 
 <image src=".github/sparrow.png" width="300" />
 
