@@ -1,6 +1,8 @@
 import os
+import json
 import yaml
 import argparse
+from tqdm import tqdm
 from pathlib import Path
 from datasets import load_dataset, concatenate_datasets
 from tokenizers import decoders, models, pre_tokenizers, processors, trainers, Tokenizer
@@ -23,6 +25,7 @@ class SparrowTokenizer:
         dataset_subset (list): A list of subset identifiers or data directories to specify which parts of the dataset
             should be used for training the tokenizer. Default is ['20231101.ru', '20231101.zh', '20231101.fr',
             '20231101.es', '20231101.en', '20231102.ar'], the six official languages used in the United Nation.
+        dataset_ratio (float): How many data are used for tokenizer training. Default is 0.05.
         remove_columns (list): A list of column names to be removed from the dataset during preprocessing.
             This is typically used to eliminate metadata columns that are not needed for tokenization. Default is ["id", "url", "title"].
         tokenizer_path (str): The directory path where the tokenizer artifacts (e.g., trained vocabulary, merges file, and any
@@ -36,6 +39,7 @@ class SparrowTokenizer:
         special_tokens: list=["<s>", "</s>", "<pad>", "<unk>", "<mask>"],
         dataset_name: str="wikimedia/wikipedia",
         dataset_subset: list=['20231101.ru', '20231101.zh', '20231101.fr', '20231101.es', '20231101.en', '20231102.ar'],
+        dataset_ratio: float=0.1,
         remove_columns: list=["id", "url", "title"],
         tokenizer_path: str="./"
     ):
@@ -48,6 +52,7 @@ class SparrowTokenizer:
         self.special_tokens = special_tokens
         self.dataset_name = dataset_name
         self.dataset_subset = dataset_subset
+        self.dataset_ratio = dataset_ratio
         self.remove_columns = remove_columns
         self.tokenizer_path = Path(tokenizer_path)
         
@@ -57,16 +62,28 @@ class SparrowTokenizer:
         outputs = [f"{title} {text}" for title, text in zip(titles, texts)]
         return {"text": outputs}
 
-    def create_dataset(self, ratio=0.1):
+    def create_dataset(self):
         data_list = [load_dataset(self.dataset_name, data_dir=self.dataset_subset[i], \
-            split="train[:{}%]".format(int(ratio * 100))) for i in range(0, len(self.dataset_subset))]
+            split="train[:{}%]".format(int(self.dataset_ratio * 100))) for i in range(0, len(self.dataset_subset))]
         dataset = concatenate_datasets(data_list)
-        dataset = dataset.map(self.process_func, batched=True, remove_columns=self.remove_columns)
+        dataset = dataset.map(self.process_func, batched=True, remove_columns=self.remove_columns, load_from_cache_file=False)
+
+        chunk_size = len(dataset["text"]) // len(self.dataset_subset)
+        remainder = len(dataset["text"]) % len(self.dataset_subset)
+
 
         print("[:)] Saving dataset...")
-        with open(Path(self.tokenizer_path / "corpus.txt"), "w", encoding="utf-8") as f:
-            for example in dataset["text"]:
-                f.write(example + "\n")
+        self.corpus_list = [str(Path(self.tokenizer_path / f"corpus{i}.txt")) for i in range(0, len(self.dataset_subset))]
+        start = 0
+        for i in tqdm(range(0, len(self.corpus_list))):
+            if os.path.isfile(self.corpus_list[i]):
+                pass
+            else:
+                extra = 1 if i < remainder else 0
+                end = start + chunk_size + extra
+                with open(self.corpus_list[i], "w", encoding="utf-8") as f:
+                    for example in dataset["text"][start:end]:
+                        f.write(example + "\n")
         print("[:)] Dataset saved")
 
     
@@ -92,7 +109,7 @@ class SparrowTokenizer:
             show_progress=True
         )
 
-        tokenizer.train([str(Path(self.tokenizer_path / "corpus.txt"))], trainer)
+        tokenizer.train(self.corpus_list, trainer)
 
         tokenizer.post_processor = processors.TemplateProcessing(
             single="<s> $A </s>",
