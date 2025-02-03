@@ -7,6 +7,8 @@ from pathlib import Path
 from datasets import load_dataset, concatenate_datasets
 from tokenizers import decoders, models, pre_tokenizers, processors, trainers, Tokenizer
 
+from transformers import AutoTokenizer
+
 class SparrowTokenizer:
     """
     params:
@@ -187,11 +189,18 @@ class SparrowTokenizer:
             pass
         
         self.config()
-        self.tokenizer.model.save(str(self.tokenizer_path), prefix="tokenizer")
-        with open(str(Path(self.tokenizer_path / "tokenizer-config.json")), "w", encoding="utf-8") as f:
+        self.tokenizer.save(str(Path(self.tokenizer_path / "tokenizer.json")))
+        self.tokenizer.model.save(str(self.tokenizer_path))
+        with open(str(Path(self.tokenizer_path / "tokenizer_config.json")), "w", encoding="utf-8") as f:
             json.dump(self.config, f, ensure_ascii=False, indent=4)
         
         print("[:)] All files are saved")
+    
+    def evaluate(self):
+        tokenizer = AutoTokenizer.from_pretrained(str(self.tokenizer_path))
+        message = "你好，世界 + Hello World + Bonjour + Hola + Привет + مرحبًا"
+        message_enc = tokenizer.encode(message)
+        message_dec = tokenizer.decode(message_enc)
 
 if __name__ == "__main__":
     args_parser = argparse.ArgumentParser(description="Continual Pretraining Argument YAML Location")
