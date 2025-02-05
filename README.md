@@ -27,5 +27,38 @@ The **sparrow** project aims to help beginner to understand the base architectur
 A good tokenizer is vital as it is the first component that converts raw text into a structured format a model can understand. It determines the granularity of tokenization and ensures that important elements—such as special tokens marking the beginning and end of a sentence—are consistently incorporated, directly affecting the model's ability to learn and generate language accurately. In `tokenizer/tokenizer.py`, we provide a `class SparrowTokenizer` to help you understand the how a tokenizer been trained. This script demonstrates the complete pipeline—from preprocessing raw data and creating a training corpus, to training a BPE-based tokenizer with customized post-processing for adding special tokens, and finally, saving the vocabulary and configuration files. You can explore this workflow by running:
 
 ```bash
-python tokenizer/tokenizer.py --args configs/tokenizers.yaml
+bash a_tokenizer.sh
+```
+
+## Models Artitecture 
+
+skip
+
+## Pretrain Process
+
+Based on the model, we can build a training process based on huggingface's [`TrainingArgument`](https://huggingface.co/docs/transformers/v4.48.0/en/main_classes/trainer#transformers.TrainingArguments) and [`Trainer`](https://huggingface.co/docs/transformers/v4.48.0/en/main_classes/trainer#transformers.Trainer). You can explore this workflow by running:
+
+```base
+bash b_pretrain.sh
+```
+
+To evaluate the trained model:
+
+```python
+from dataset.dataset import *
+from model.modelling_sparrow import * 
+from model.configuration_sparrow import * 
+from transformers import Trainer, TrainingArguments, DefaultDataCollator, AutoTokenizer, AutoModelForCausalLM, AutoConfig
+
+device = "cuda:0"
+
+# register model and config before use
+AutoConfig.register("sparrow", SparrowConfig)
+AutoModelForCausalLM.register(SparrowConfig, SparrowModel)
+model = AutoModelForCausalLM.from_pretrained("{model_location}").to(device)
+tokenizer = AutoTokenizer.from_pretrained("{tokenizer_location}")
+
+input_ids = tokenizer.encode("<s>United Nation is",  add_special_tokens=False, return_tensors="pt").to(model.device)
+for token in model.generate(input_ids, tokenizer.eos_token_id, 30, stream=False,temperature=0.7, top_k=5):
+    print(tokenizer.decode(token[0]))
 ```

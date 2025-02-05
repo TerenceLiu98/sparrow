@@ -1,0 +1,43 @@
+# Data arguments
+train_path: "/data/sparrow/pretrain.jsonl"
+tokenizer_path: "/data/sparrow/tokenizer"
+model_path: "/data/sparrow/model"
+cache_path: "/data/sparrow/tmp"
+
+# Model arguments
+
+hidden_size: 512
+num_hidden_layers: 8
+num_attention_heads: 16
+num_key_value_heads: null
+max_seq_len: 512
+attention_bias: False
+flash_attn: True
+vocab_size: 32000
+hidden_dim: null
+intermediate_dim: 2048
+norm_eps: 1e-5
+mlp_bias: False
+dropout: 0.0
+
+# Training arguments
+
+cache_dir: "/home/jovyan/.cache/"
+model_max_length: 512
+optim: "adamw_torch"
+adam_beta1: 0.9
+adam_beta2: 0.999
+max_grad_norm: 1.0
+output_dir: '/data/sparrow/results'
+do_train: True 
+per_device_train_batch_size: 32
+gradient_accumulation_steps: 8
+max_steps: 15000
+logging_steps: 100
+save_total_limit: 5
+bf16: True
+learning_rate: 2.0e-4
+lr_scheduler_type: 'cosine'
+dataloader_num_workers: 8
+dataloader_pin_memory: True
+save_safetensors: False

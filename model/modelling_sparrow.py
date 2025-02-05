@@ -1,0 +1,247 @@
+import math
+import torch 
+import torch.nn as nn
+import torch.nn.functional as F 
+
+from transformers import PreTrainedModel
+from transformers.modeling_outputs import CausalLMOutputWithPast
+
+from model.configuration_sparrow import SparrowConfig
+
+## RoPE - from https://arxiv.org/pdf/2104.09864v5
+def rotate_half(x):
+    x1, x2 = x.chunk(2, dim=-1)
+    return torch.cat((-x2, x1), dim=-1)
+
+# 应用位置编码
+def apply_rotate_pos_emb(q, k, cos, sin, unsqueeze_dim=2):
+    
+    cos = cos.unsqueeze(unsqueeze_dim) # (1, seq_len, 1, dim)
+    sin = sin.unsqueeze(unsqueeze_dim) # (1, seq_len, 1, dim)
+   
+    q_embed = (q*cos) + (rotate_half(q)*sin)  # (batch_size, seq_len, head_num, dim) * (1, seq_len, 1, dim) = (batch_size, seq_len, head_num, dim) 广播
+    k_embed = (k*cos) + (rotate_half(k)*sin)  # (batch_size, seq_len, head_num, dim) * (1, seq_len, 1, dim) = = (batch_size, seq_len, head_num, dim) 广播
+    
+    return q_embed, k_embed
+
+class RotaryEmbedding(nn.Module):
+    def __init__(self, dim, max_seq_len=2048):
+        super(RotaryEmbedding, self).__init__()
+        self.hidden_size = dim
+        self.max_seq_len = max_seq_len
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))  # 形状(dim/2)
+        t = torch.arange(max_seq_len).float().unsqueeze(1)  # 形状(max_seq_len, 1)
+        freqs = t @ inv_freq.unsqueeze(0)  #(max_seq_len, 1)*(1, dim/2) = (max_seq_len, dim/2)
+        freqs = torch.cat((freqs, freqs), dim=-1)  # (max_seq_len, dim)
+        
+        self.register_buffer("cos_cached", freqs.cos())
+        self.register_buffer("sin_cached", freqs.sin())
+        
+    def forward(self, q, k):
+        cos = self.cos_cached[:q.shape[1], :].unsqueeze(0)  # (1, seq_len, dim)
+        sin = self.sin_cached[:q.shape[1], :].unsqueeze(0)  # (1, seq_len, dim)
+        return apply_rotate_pos_emb(q, k, cos, sin)
+    
+
+## RMSNorm
+class RMSNorm(nn.Module):
+    def __init__(self, dim: int, eps: float=1.0e-6):
+        super(RMSNorm, self).__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+    
+    def normalize(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x):
+        output = self.normalize(x).type_as(x)
+        return output * self.weight
+
+def repeat_kv(x, n_rep):
+    batch, length, num_key_value_heads, head_dim = x.shape
+    if n_rep == 1:
+        return x
+    
+    x = x[:, :, :, None, :].expand(batch, length, num_key_value_heads, n_rep, head_dim)
+    return x.reshape(batch, length, num_key_value_heads * n_rep, head_dim)
+
+## SparrowAttention
+class SparrowAttention(nn.Module):
+    '''
+    '''
+    def __init__(self, config: SparrowConfig=None):
+        super(SparrowAttention, self).__init__()
+        self.config = config
+        self.hidden_size = config.hidden_size
+        self.num_hidden_layers = config.num_hidden_layers
+        self.num_attention_heads = config.num_attention_heads
+        self.head_dim = getattr(config, "head_dim", self.hidden_size // self.num_attention_heads)
+        self.num_key_value_heads = config.num_key_value_heads
+        self.num_key_value_groups = self.num_attention_heads // self.num_key_value_heads
+        self.vocab_size = config.vocab_size
+        self.dropout = config.dropout
+        self.rotary_emb = RotaryEmbedding(dim=self.head_dim)
+    
+        self.wq = nn.Linear(self.hidden_size, self.num_attention_heads * self.head_dim, bias=self.config.attention_bias)
+        self.wk = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=self.config.attention_bias)
+        self.wv = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=self.config.attention_bias)
+        self.wo = nn.Linear(self.num_attention_heads * self.head_dim, self.hidden_size, bias=self.config.attention_bias)
+        self.k_cache, self.v_cache = None, None
+        self.attention_dropout = nn.Dropout(self.dropout)
+        self.residual_dropout = nn.Dropout(self.dropout)
+    
+    def forward(self, x: torch.Tensor, use_kv_cache=False):
+        b, s = x.shape[:2]
+        if use_kv_cache and self.eval():
+            if self.k_cache is None or self.k_cache.shape[1] != s-1:
+                q, k, v = self.wq(x), self.wk(x), self.wv(x)
+            else:
+                token = x[:, -1:, :]
+                q = torch.cat((torch.zeros_like(x[:, :-1, :]), self.wq(token)), dim=1) 
+                k = torch.cat((self.k_cache, self.wk(token)), dim=1)
+                v = torch.cat((self.v_cache, self.wv(token)), dim=1)
+            
+            self.k_cache, self.v_cache = k, v
+        else:
+            q, k, v = self.wq(x), self.wk(x), self.wv(x)
+
+        q = q.view(b, s, self.num_attention_heads, self.head_dim)
+        k = k.view(b, s, self.num_key_value_heads, self.head_dim)
+        v = v.view(b, s, self.num_key_value_heads, self.head_dim)
+        q, k = self.rotary_emb(q, k)
+        k, v = repeat_kv(k, self.num_key_value_groups), repeat_kv(v, self.num_key_value_groups)
+        
+        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+
+        if self.config.flash_attn:
+            output = F.scaled_dot_product_attention(q, k, v, attn_mask=None, 
+                                                    dropout_p=self.dropout if self.training else 0.0, 
+                                                    is_causal=True)
+        else:
+            mask = torch.full((1, 1, self.config.max_seq_len, self.config.max_seq_len), float("-inf"), device=x.device) 
+            mask = torch.triu(mask, diagonal=1)
+            scores = torch.matmul(q, k.transpose(2, 3)) / math.sqrt(self.head_dim)
+            scores = scores + mask[:, :, :s, :s]
+            scores = F.softmax(scores.float(), dim=-1).type_as(q)
+            scores = self.attention_dropout(scores)
+            output = torch.matmul(scores, v) 
+        
+        output = output.transpose(1, 2).contiguous().view(b, s, -1)
+        output = self.wo(output)
+        output = self.residual_dropout(output)
+        return output
+
+class SparrowLinear(nn.Module):
+    def __init__(self, config: SparrowConfig=None):
+        super(SparrowLinear, self).__init__()
+        self.config = config
+        self.hidden_size = config.hidden_size
+        self.intermediate_dim = config.intermediate_dim
+        self.gate = nn.Linear(self.hidden_size, self.intermediate_dim, bias=self.config.mlp_bias)
+        self.up = nn.Linear(self.hidden_size, self.intermediate_dim, bias=self.config.mlp_bias)
+        self.out = nn.Linear(self.intermediate_dim, self.hidden_size, bias=self.config.mlp_bias)
+    
+    def forward(self, x):
+        return self.out(F.silu(self.gate(x)) * self.up(x))
+
+class SparrowDecoderLayer(nn.Module):
+    def __init__(self, config: SparrowConfig=None, layer_idx: int=None):
+        super(SparrowDecoderLayer, self).__init__()
+        self.hidden_size = config.hidden_size
+        self.attention = SparrowAttention(config=config)
+        self.linear = SparrowLinear(config=config)
+        self.input_norm = RMSNorm(dim=config.hidden_size)
+        self.pos_attn_norm = RMSNorm(dim=config.hidden_size)
+        self.layer_idx = layer_idx
+    
+    def forward(self, x, use_kv_cache):
+        residual = x
+        x = self.input_norm(x)
+        residual, x = x, self.attention(x=x, use_kv_cache=use_kv_cache) + residual
+        x = self.linear(self.pos_attn_norm(x))
+        x = x + residual
+        return x
+
+class SparrowModel(PreTrainedModel):
+    config_class = SparrowConfig
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.config = config
+        self.vocab_size = self.config.vocab_size
+        self.num_hidden_layers = self.config.num_hidden_layers
+        self.token_embedding = nn.Embedding(self.config.vocab_size, self.config.hidden_size)
+        self.dropout = nn.Dropout(self.config.dropout)
+
+        self.decoder = nn.ModuleList()
+        for layer_idx in range(self.num_hidden_layers):
+            self.decoder.append(SparrowDecoderLayer(config=self.config, layer_idx=layer_idx))
+        
+        self.norm = RMSNorm(dim=self.config.hidden_size)
+        self.output = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=self.config.mlp_bias)
+        self.token_embedding.weight = self.output.weight
+        self.apply(self.weights_init)
+        self.loss = None
+
+        for pn, p in self.named_parameters():
+            if pn.endswith('w3.weight') or pn.endswith('wo.weight'):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * self.config.num_hidden_layers)) 
+    
+    def weights_init(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+    
+    def forward(self, input_ids, labels, use_kv_cache=False):
+        x = self.dropout(self.token_embedding(input_ids))
+        
+        for idx, layer in enumerate(self.decoder):
+            x = layer(x=x, use_kv_cache=use_kv_cache)
+        
+        if labels is not None:
+            logits = self.output(x)  
+            self.loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=0) 
+        else:
+            logits = self.output(x[:, [-1], :])  
+            self.loss = None  
+
+        return CausalLMOutputWithPast(self.loss, logits)
+    
+    @torch.inference_mode
+    def generate(self, input_ids, eos, max_new_tokens, temperature=0.7, top_k=None, stream=True, repetition_penalty=1.,
+                 use_kv_cache=True):
+
+        s = input_ids.shape[1]
+        while input_ids.shape[1] < max_new_tokens - 1:  
+            inference_res = self(input_ids, labels=None, use_kv_cache=use_kv_cache)  
+            logits = inference_res.logits 
+            logits = logits[:, -1, :] 
+
+            for token in set(input_ids.tolist()[0]):  
+                logits[:, token] /= repetition_penalty
+
+            if temperature == 0.0: 
+                _, idx_next = torch.topk(logits, k=1, dim=-1)
+            else:
+                logits = logits / temperature  
+                if top_k is not None:  
+                    v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                    logits[logits < v[:, [-1]]] = -float('Inf') 
+
+                probs = F.softmax(logits, dim=-1)  
+                idx_next = torch.multinomial(probs, num_samples=1, generator=None)  
+
+            if idx_next == eos:  
+                break
+
+            input_ids = torch.cat((input_ids, idx_next), dim=1)  
+            if stream:  
+                yield input_ids[:, s:]  
+
+        if not stream:  
+            yield input_ids[:, s:] 

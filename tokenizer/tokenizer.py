@@ -27,7 +27,7 @@ class SparrowTokenizer:
         dataset_subset (list): A list of subset identifiers or data directories to specify which parts of the dataset
             should be used for training the tokenizer. Default is ['20231101.ru', '20231101.zh', '20231101.fr',
             '20231101.es', '20231101.en', '20231102.ar'], the six official languages used in the United Nation.
-        dataset_ratio (float): How many data are used for tokenizer training. Default is 0.05.
+        dataset_ratio (float): How many data are used for tokenizer training. Default is 0.1 (randomly).
         remove_columns (list): A list of column names to be removed from the dataset during preprocessing.
             This is typically used to eliminate metadata columns that are not needed for tokenization. Default is ["id", "url", "title"].
         tokenizer_path (str): The directory path where the tokenizer artifacts (e.g., trained vocabulary, merges file, and any
@@ -66,7 +66,7 @@ class SparrowTokenizer:
 
     def create_dataset(self):
         data_list = [load_dataset(self.dataset_name, data_dir=self.dataset_subset[i], \
-            split="train[:{}%]".format(int(self.dataset_ratio * 100))) for i in range(0, len(self.dataset_subset))]
+            split="train[:]").shuffle().train_test_split(self.dataset_ratio)["test"] for i in range(0, len(self.dataset_subset))]
         dataset = concatenate_datasets(data_list)
         dataset = dataset.map(self.process_func, batched=True, remove_columns=self.remove_columns, load_from_cache_file=False)
 
@@ -104,6 +104,8 @@ class SparrowTokenizer:
         tokenizer.decoder = decoders.ByteLevel()
     
         trainer = trainers.BpeTrainer(
+
+            
             vocab_size=self.vocab_size,
             min_frequency=self.min_frequency,
             special_tokens=self.special_tokens,
