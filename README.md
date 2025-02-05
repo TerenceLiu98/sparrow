@@ -18,9 +18,10 @@ The **sparrow** project aims to help beginner to understand the base architectur
 - [ ] supervised fine-tuning
 - [ ] Reward Modelling
 
-## Data Preparation
+## Before
 
 1. For tokenizer and pretraining process, to simplify the data collection process, we use the data from [`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia), ensuring that our training corpus is both rich in content and easily accessible. We use 10%-20% of the data with six official language of United Nation — Arabic, Chinese, English, French, Russian, and Spanish—providing a diverse and representative sample for training our tokenizer.
+2. All parameters of training are located in `./configs/`, you may change it before you train each module
 
 ## Tokenizer
 
