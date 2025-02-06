@@ -48,7 +48,6 @@ To evaluate the trained model:
 ```python
 from dataset.dataset import *
 from model.modelling_sparrow import * 
-from model.configuration_sparrow import * 
 from transformers import Trainer, TrainingArguments, DefaultDataCollator, AutoTokenizer, AutoModelForCausalLM, AutoConfig
 
 device = "cuda:0"
