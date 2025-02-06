@@ -83,7 +83,7 @@ class SparrowForCausalLM(object):
         self.trainer.train()
 
     def save(self):
-        self.model.save_pretrained(self.data_args.model_path)
+        self.model.save_pretrained(self.data_args.model_path, safe_serialization=False)
         self.tokenizer.save_pretrained(self.data_args.model_path)
 
 if __name__ == "__main__":
