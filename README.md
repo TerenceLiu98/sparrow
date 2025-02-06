@@ -54,11 +54,12 @@ device = "cuda:0"
 
 # register model and config before use
 AutoConfig.register("sparrow", SparrowConfig)
-AutoModelForCausalLM.register(SparrowConfig, SparrowModel)
+AutoModelForCausalLM.register(SparrowConfig, SparrowModelForCausalLM)
 model = AutoModelForCausalLM.from_pretrained("{model_location}").to(device)
 tokenizer = AutoTokenizer.from_pretrained("{tokenizer_location}")
 
 input_ids = tokenizer.encode("<s>United Nation is",  add_special_tokens=False, return_tensors="pt").to(model.device)
-for token in model.generate(input_ids, tokenizer.eos_token_id, 30, stream=False,temperature=0.7, top_k=5):
-    print(tokenizer.decode(token[0]))
+output_ids = model.generate(input_ids, epos=okenizer.eos_token_id, max_new_tokens=30, \
+    temperature=0.7, top_k=5, use_beam_search=False, beam_size=3)
+print(f"generated output: {tokenizer.decode(output_ids, skip_special_tokens=False)}")
 ```

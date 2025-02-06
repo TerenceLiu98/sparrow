@@ -214,14 +214,7 @@ class SparrowModel(PreTrainedModel):
             self.decoder.append(SparrowDecoderLayer(config=self.config, layer_idx=layer_idx))
         
         self.norm = RMSNorm(dim=self.config.hidden_size)
-        self.output = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=self.config.mlp_bias)
-        self.token_embedding.weight = self.output.weight
         self.apply(self.weights_init)
-        self.loss = None
-
-        for pn, p in self.named_parameters():
-            if pn.endswith('w3.weight') or pn.endswith('wo.weight'):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * self.config.num_hidden_layers)) 
     
     def weights_init(self, module):
         if isinstance(module, nn.Linear):
@@ -233,11 +226,27 @@ class SparrowModel(PreTrainedModel):
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
     
-    def forward(self, input_ids, labels, use_kv_cache=False):
+    def forward(self, input_ids, use_kv_cache=False):
         x = self.dropout(self.token_embedding(input_ids))
         
         for idx, layer in enumerate(self.decoder):
             x = layer(x=x, use_kv_cache=use_kv_cache)
+        
+        return self.norm(x)
+
+class SparrowModelForCausalLM(SparrowModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.output = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=self.config.mlp_bias)
+        self.token_embedding.weight = self.output.weight
+        self.loss = None
+
+        for pn, p in self.named_parameters():
+            if pn.endswith('w3.weight') or pn.endswith('wo.weight'):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * self.config.num_hidden_layers))
+        
+    def forward(self, input_ids, labels=None, use_kv_cache=False):
+        x = super().forward(input_ids, use_kv_cache)
         
         if labels is not None:
             logits = self.output(x)  
@@ -248,36 +257,63 @@ class SparrowModel(PreTrainedModel):
 
         return CausalLMOutputWithPast(self.loss, logits)
     
-    @torch.inference_mode
-    def generate(self, input_ids, eos, max_new_tokens, temperature=0.7, top_k=None, stream=True, repetition_penalty=1.,
-                 use_kv_cache=True):
-
+    @torch.no_grad()
+    def generate(self, input_ids, eos=1, max_new_tokens=50, temperature=0.7, top_k=None, repetition_penalty=1.,
+                 use_kv_cache=True, use_beam_search=False, beam_size=3):
         s = input_ids.shape[1]
-        while input_ids.shape[1] < max_new_tokens - 1:  
-            inference_res = self(input_ids, labels=None, use_kv_cache=use_kv_cache)  
-            logits = inference_res.logits 
-            logits = logits[:, -1, :] 
-
-            for token in set(input_ids.tolist()[0]):  
-                logits[:, token] /= repetition_penalty
-
-            if temperature == 0.0: 
-                _, idx_next = torch.topk(logits, k=1, dim=-1)
+        
+        if use_beam_search:
+            sequences = [(input_ids, 0)]  # List of (sequence, cumulative log probability)
+            for _ in range(max_new_tokens - 1):
+                all_candidates = []
+                for seq, score in sequences:
+                    inference_res = self(seq, labels=None, use_kv_cache=use_kv_cache)
+                    logits = inference_res.logits[:, -1, :]
+                    
+                    if repetition_penalty != 1.0:
+                        for token in set(seq.tolist()[0]):
+                            logits[:, token] /= repetition_penalty
+                    
+                    logits = logits / temperature if temperature > 0 else logits
+                    probs = F.log_softmax(logits, dim=-1)
+                    top_log_prob, idx_next = torch.topk(probs, beam_size, dim=-1)
+                    
+                    for i in range(beam_size):
+                        next_seq = torch.cat((seq, idx_next[:, i].unsqueeze(1)), dim=1)
+                        next_score = score + top_log_prob[:, i].item()
+                        all_candidates.append((next_seq, next_score))
+                
+                sequences = sorted(all_candidates, key=lambda x: x[1], reverse=True)[:beam_size]
+                if all(seq[0][:, -1].item() == eos for seq in sequences):
+                    break
+            
+            best_seq = sequences[0][0]
+            return best_seq.tolist()[0][s:]
+        
+        # Greedy search (default)
+        generated_tokens = []
+        while len(generated_tokens) < max_new_tokens - 1:
+            inference_res = self(input_ids, labels=None, use_kv_cache=use_kv_cache)
+            logits = inference_res.logits[:, -1, :]
+            
+            if repetition_penalty != 1.0:
+                for token in set(input_ids.tolist()[0]):
+                    logits[:, token] /= repetition_penalty
+            
+            if temperature == 0.0:
+                idx_next = torch.argmax(logits, dim=-1, keepdim=True)
             else:
-                logits = logits / temperature  
-                if top_k is not None:  
+                logits = logits / temperature
+                if top_k is not None:
                     v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                    logits[logits < v[:, [-1]]] = -float('Inf') 
-
-                probs = F.softmax(logits, dim=-1)  
-                idx_next = torch.multinomial(probs, num_samples=1, generator=None)  
-
-            if idx_next == eos:  
+                    logits[logits < v[:, [-1]]] = -float('Inf')
+                probs = F.softmax(logits, dim=-1)
+                idx_next = torch.multinomial(probs, num_samples=1)
+            
+            if idx_next.item() == eos:
                 break
-
-            input_ids = torch.cat((input_ids, idx_next), dim=1)  
-            if stream:  
-                yield input_ids[:, s:]  
-
-        if not stream:  
-            yield input_ids[:, s:] 
+            
+            input_ids = torch.cat((input_ids, idx_next), dim=1)
+            generated_tokens.append(idx_next.item())
+        
+        return generated_tokens
