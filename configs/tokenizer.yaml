@@ -1,5 +1,6 @@
 vocab_size: 32000
 min_frequency: 5
+local_data: /data/sparrow/pretrain.jsonl
 dataset_name: wikimedia/wikipedia
 dataset_subset: ['20231101.ru', '20231101.zh', '20231101.fr', '20231101.es', '20231101.en', '20231101.ar']
 dataset_ratio: 0.1

@@ -39,6 +39,7 @@ class SparrowTokenizer:
         vocab_size: int=32000,
         min_frequency: int=2,
         special_tokens: list=["<s>", "</s>", "<pad>", "<unk>", "<mask>"],
+        local_data: str=None,
         dataset_name: str="wikimedia/wikipedia",
         dataset_subset: list=['20231101.ru', '20231101.zh', '20231101.fr', '20231101.es', '20231101.en', '20231102.ar'],
         dataset_ratio: float=0.1,
@@ -52,6 +53,7 @@ class SparrowTokenizer:
         self.vocab_size = vocab_size
         self.min_frequency = min_frequency
         self.special_tokens = special_tokens
+        self.local_data = local_data
         self.dataset_name = dataset_name
         self.dataset_subset = dataset_subset
         self.dataset_ratio = dataset_ratio
@@ -65,17 +67,24 @@ class SparrowTokenizer:
         return {"text": outputs}
 
     def create_dataset(self):
-        data_list = [load_dataset(self.dataset_name, data_dir=self.dataset_subset[i], \
-            split="train[:]").shuffle().train_test_split(self.dataset_ratio)["test"] for i in range(0, len(self.dataset_subset))]
-        dataset = concatenate_datasets(data_list)
-        dataset = dataset.map(self.process_func, batched=True, remove_columns=self.remove_columns, load_from_cache_file=False)
 
-        chunk_size = len(dataset["text"]) // len(self.dataset_subset)
-        remainder = len(dataset["text"]) % len(self.dataset_subset)
-
+        if self.local_data is not None:
+            print("[:)] Loading the data from lodal drive...")
+            dataset = load_dataset("json", data_files={"data": self.local_data}, split="data[:50%]")
+            chunk_size = len(dataset["text"]) // 6
+            remainder = len(dataset["text"]) % 6
+            self.corpus_list = [str(Path(self.tokenizer_path / f"corpus{i}.txt")) for i in range(0, 6)]
+        else:
+            print("[:)] Loading the data from huggingface...")
+            data_list = [load_dataset(self.dataset_name, data_dir=self.dataset_subset[i], \
+                split="train[:]").shuffle().train_test_split(self.dataset_ratio)["test"] for i in range(0, len(self.dataset_subset))]
+            dataset = concatenate_datasets(data_list)
+            dataset = dataset.map(self.process_func, batched=True, remove_columns=self.remove_columns, load_from_cache_file=False)
+            chunk_size = len(dataset["text"]) // len(self.dataset_subset)
+            remainder = len(dataset["text"]) % len(self.dataset_subset)
+            self.corpus_list = [str(Path(self.tokenizer_path / f"corpus{i}.txt")) for i in range(0, len(self.dataset_subset))]
 
         print("[:)] Saving dataset...")
-        self.corpus_list = [str(Path(self.tokenizer_path / f"corpus{i}.txt")) for i in range(0, len(self.dataset_subset))]
         start = 0
         for i in tqdm(range(0, len(self.corpus_list))):
             if os.path.isfile(self.corpus_list[i]):

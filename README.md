@@ -13,15 +13,18 @@
 
 The **sparrow** project aims to help beginner to understand the base architecture of a large language model from scratch. Not only the model, but also the optimization methods that are widely use to shorten the training process.
 
-- [ ] tokenizer from scratch & merge tokenizer
-- [ ] model modules from scratch & train the stacked model
+- [x] tokenizer from scratch & merge tokenizer
+- [x] base model modules from scratch & train the stacked model
 - [ ] supervised fine-tuning
 - [ ] Reward Modelling
+- [ ] Mixture-of-Expert
 
 ## Before
 
-1. For tokenizer and pretraining process, to simplify the data collection process, we use the data from [`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia), ensuring that our training corpus is both rich in content and easily accessible. We use 10%-20% of the data with six official language of United Nation — Arabic, Chinese, English, French, Russian, and Spanish—providing a diverse and representative sample for training our tokenizer.
-2. All parameters of training are located in `./configs/`, you may change it before you train each module
+1. For tokenizer and pretraining process, to simplify the data collection process, we use the data from [`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia), ensuring that our training corpus is both rich in content and easily accessible. We use 0.2M of the data for each six official languages of United Nation — Arabic, Chinese, English, French, Russian, and Spanish—providing a diverse and representative sample for training our tokenizer.
+2. For pretrain process, we also use [`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia) to ensure the model's token embedding and tokenizer's alignment. 
+3. For the instruct tuning process, we adopt the [`Open-Orca/OpenOrca`](https://huggingface.co/datasets/Open-Orca/OpenOrca) and [`cognitivecomputations/dolphin`](https://huggingface.co/datasets/cognitivecomputations/dolphin) as the dataset. 
+4. All parameters of training are located in `./configs/`, you may change it before you train each module
 
 ## Tokenizer
 
@@ -59,7 +62,7 @@ model = AutoModelForCausalLM.from_pretrained("{model_location}").to(device)
 tokenizer = AutoTokenizer.from_pretrained("{tokenizer_location}")
 
 input_ids = tokenizer.encode("<s>United Nation is",  add_special_tokens=False, return_tensors="pt").to(model.device)
-output_ids = model.generate(input_ids, epos=okenizer.eos_token_id, max_new_tokens=30, \
-    temperature=0.7, top_k=5, use_beam_search=False, beam_size=3)
+output_ids = model.generate(input_ids, eos=tokenizer.eos_token_id, max_new_tokens=30, \
+    temperature=0.7, top_k=5, use_beam_search=True, beam_size=3)
 print(f"generated output: {tokenizer.decode(output_ids, skip_special_tokens=False)}")
 ```

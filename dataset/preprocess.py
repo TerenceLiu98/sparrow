@@ -14,7 +14,7 @@ class DataPreprocess(object):
         self.dataset_size = dataset_size
         self.path = path
     
-    def preprocess(self):
+    def pretrain_dataset(self):
         num_row = np.arange(0, self.dataset_size // len(self.dataset_subset), dtype=int).tolist()
         data_list = [load_dataset(self.dataset_name, data_dir=self.dataset_subset[i],\
             split="train").shuffle().select(num_row) for i in tqdm(range(0, len(self.dataset_subset)))]
@@ -23,7 +23,12 @@ class DataPreprocess(object):
         self.dataset.to_json(str(self.path + "pretrain.jsonl"))
         print("[:)] pretrain dataset saved")
     
+    def instruct_dataset(self):
+        dataset_name = [""]
+        self.dataset.to_json(str(self.path + "instruct.jsonl"))
+
+    
 if __name__ == "__main__":
     ps = DataPreprocess(dataset_name="wikimedia/wikipedia", 
         dataset_subset=['20231101.ru', '20231101.zh', '20231101.fr', '20231101.es', '20231101.en', '20231101.ar'])
-    ps.preprocess()
+    ps.pretrain_dataset()

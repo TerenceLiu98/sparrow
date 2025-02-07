@@ -1,4 +1,4 @@
-import os
+import os 
 import sys
 import yaml
 import argparse
@@ -8,16 +8,19 @@ from dataclasses import dataclass, field
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from dataset.dataset import *
+from dataset.dataset import * 
 from model.modelling_sparrow import *
 
+import torch
 from transformers import HfArgumentParser, Trainer, TrainingArguments, AutoTokenizer, DefaultDataCollator
 
 @dataclass
 class DataArguments:
-    train_path: str=field(default=None, metadata={"help": "Path of the train dataset"}) 
+    train_path: str=field(default=None, metadata={"help": "Path of the train dataset"})
+    valid_path: str=field(default=None, metadata={"help": "Path of the valid dataset"}) 
     tokenizer_path: str=field(default="/data/sparrow/tokenizer", metadata={"help": "Path of the tokenizer"})
-    model_path: str=field(default="/data/sparrow/model", metadata={"help": "Path of the trained model - finalized"})
+    pretrain_model_path: str=field(default="/data/sparrow/model/pretrain", metadata={"help": "Path of the pretrained model"})
+    instruct_model_path: str=field(default="/data/sparrow/model/instruct", metadata={"help": "Path of the instructed model"})
     cache_path: str=field(default="/data/sparrow/tmp", metadata={"help": "Path of tmp file of model training (checkpoint)"})
 
 @dataclass
@@ -57,23 +60,27 @@ class Experiment(object):
         super(Experiment, self).__init__()
         self.data_args = data_args
         self.train_args = train_args
-        self.model_args = SparrowConfig(**model_args.__dict__)
+        self.self.model_args = SparrowConfig(**model_args.__dict__)
         self.load_model()
         self.load_dataset()
     
     def load_dataset(self):
-        self.trainset = PretrainDataset(data_path=self.data_args.train_path, tokenizer=self.tokenizer, max_seq_len=self.train_args.model_max_length)
-
+        self.trainset = InstructDataset(data_path=self.data_args.train_path, 
+            tokenizer=self.tokenizer, max_seq_len=self.train_args.model_max_length)
+        self.validset = InstructDataset(data_path=self.data_args.valid_path, 
+            tokenizer=self.tokenizer, max_seq_len=self.train_args.model_max_length)
+    
     def load_model(self):
         self.tokenizer = AutoTokenizer.from_pretrained(self.data_args.tokenizer_path)
         self.model = SparrowModelForCausalLM(self.model_args)
+        self.model.load_state_dict(torch.load(str(Path(self.data_args.pretrain_model_path) / "pytorch_model.bin")))
     
     def train(self):
-        self.trainer  = Trainer(
+        self.trainer = Trainer(
             model=self.model,
             args=self.train_args,
             train_dataset=self.trainset,
-            processing_class=self.tokenizer, 
+            processing_class=self.tokenizer,
             data_collator=DefaultDataCollator()
         )
 
@@ -87,11 +94,11 @@ class Experiment(object):
             self.trainer.train()
 
     def save(self):
-        self.model.save_pretrained(self.data_args.model_path, safe_serialization=self.train_args.save_safetensors)
-        self.tokenizer.save_pretrained(self.data_args.model_path)
+        self.model.save_pretrained(self.data_args.instruct_model_path, safe_serialization=self.train_args.save_safetensors)
+        self.tokenizer.save_pretrained(self.data_args.instruct_model_path)
 
 if __name__ == "__main__":
-    args_parser = argparse.ArgumentParser(description="Pretraining Argument YAML")
+    args_parser = argparse.ArgumentParser(description="Instruct-Tuning Argument YAML")
     args_parser.add_argument("--args", type=str, required=False, default="./params.yaml")
     args_parser = args_parser.parse_args()
     args = yaml.safe_load(Path(f"{args_parser.args}").read_text())
