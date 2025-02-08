@@ -23,7 +23,7 @@ The **sparrow** project aims to help beginner to understand the base architectur
 
 1. For tokenizer and pretraining process, to simplify the data collection process, we use the data from [`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia), ensuring that our training corpus is both rich in content and easily accessible. We use 0.2M of the data for each six official languages of United Nation — Arabic, Chinese, English, French, Russian, and Spanish—providing a diverse and representative sample for training our tokenizer.
 2. For pretrain process, we also use [`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia) to ensure the model's token embedding and tokenizer's alignment. 
-3. For the instruct tuning process, we adopt the [`Open-Orca/OpenOrca`](https://huggingface.co/datasets/Open-Orca/OpenOrca) and [`cognitivecomputations/dolphin`](https://huggingface.co/datasets/cognitivecomputations/dolphin) as the dataset. 
+3. For the instruct tuning process, we adopt the [`Open-Orca/OpenOrca`](https://huggingface.co/datasets/Open-Orca/OpenOrca) and [`cognitivecomputations/dolphin`](https://huggingface.co/datasets/cognitivecomputations/dolphin) as the dataset. (Optional: [`kaist-ai/CoT-Collection`](https://huggingface.co/datasets/kaist-ai/CoT-Collection)) 
 4. All parameters of training are located in `./configs/`, you may change it before you train each module
 
 ## Tokenizer

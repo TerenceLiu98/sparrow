@@ -60,11 +60,12 @@ class Experiment(object):
         super(Experiment, self).__init__()
         self.data_args = data_args
         self.train_args = train_args
-        self.self.model_args = SparrowConfig(**model_args.__dict__)
+        self.model_args = SparrowConfig(**model_args.__dict__)
         self.load_model()
         self.load_dataset()
     
     def load_dataset(self):
+        print("[:)] Loading Dataset")
         self.trainset = InstructDataset(data_path=self.data_args.train_path, 
             tokenizer=self.tokenizer, max_seq_len=self.train_args.model_max_length)
         self.validset = InstructDataset(data_path=self.data_args.valid_path, 
@@ -74,7 +75,7 @@ class Experiment(object):
         self.tokenizer = AutoTokenizer.from_pretrained(self.data_args.tokenizer_path)
         self.model = SparrowModelForCausalLM(self.model_args)
         self.model.load_state_dict(torch.load(str(Path(self.data_args.pretrain_model_path) / "pytorch_model.bin")))
-    
+
     def train(self):
         self.trainer = Trainer(
             model=self.model,
