@@ -250,7 +250,7 @@ class SparrowModelForCausalLM(SparrowModel):
         
         if labels is not None:
             logits = self.output(x)  
-            self.loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=0) 
+            self.loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=-100) 
         else:
             logits = self.output(x[:, [-1], :])  
             self.loss = None  

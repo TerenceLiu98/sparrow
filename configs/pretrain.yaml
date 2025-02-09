@@ -28,7 +28,7 @@ optim: "adamw_torch"
 adam_beta1: 0.9
 adam_beta2: 0.999
 max_grad_norm: 1.0
-output_dir: '/data/sparrow/results'
+output_dir: '/data/sparrow/results/pretrain'
 do_train: True 
 per_device_train_batch_size: 32
 gradient_accumulation_steps: 8

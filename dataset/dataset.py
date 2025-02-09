@@ -85,7 +85,7 @@ class InstructDataset(IterableDataset):
                 
                 yield {
                     'input_ids': torch.tensor(input_ids), 
-                    'output_ids': torch.tensor(output_ids),
+                    'labels': torch.tensor(output_ids),
                 }
 
 if __name__ == "__main__":
