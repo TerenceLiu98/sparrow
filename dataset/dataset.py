@@ -30,7 +30,7 @@ class PretrainDataset(IterableDataset):
                 if text_len > self.max_seq_len:
                     input_ids = input_ids[:self.max_seq_len]
                 else:
-                    input_ids = input_ids + [0] * (self.max_seq_len - text_len)
+                    input_ids = input_ids + [-100] * (self.max_seq_len - text_len)
                 input_ids = np.array(input_ids)
                 X = np.array(input_ids[:-1]).astype(np.int64)
                 Y = np.array(input_ids[1:]).astype(np.int64)

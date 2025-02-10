@@ -61,8 +61,15 @@ AutoModelForCausalLM.register(SparrowConfig, SparrowModelForCausalLM)
 model = AutoModelForCausalLM.from_pretrained("{model_location}").to(device)
 tokenizer = AutoTokenizer.from_pretrained("{tokenizer_location}")
 
+# For pretrained Model
 input_ids = tokenizer.encode("<s>United Nation is",  add_special_tokens=False, return_tensors="pt").to(model.device)
 output_ids = model.generate(input_ids, eos=tokenizer.eos_token_id, max_new_tokens=30, \
     temperature=0.7, top_k=5, use_beam_search=True, beam_size=3)
 print(f"generated output: {tokenizer.decode(output_ids, skip_special_tokens=False)}")
+
+# For Instruct Tuning Model
+input_ids = tokenizer.apply_chat_template([{"role": "system", "content": "You are an AI assistant that follows instruction extremely well. Help as much as you can."}, 
+                {"role": "user", "content": '''Article: Hi!My name is Maria. Now I am in China. My life is busy but very happy. I like reading, so I often go to the library when I have no classes. Who is my favorite teacher? She is Ms. Green. She often helps me with my writing. I work hard at every subject, but my favorite subject is P.E., because I like playing tennis. In the evening, I am busy doing my homework. I often do my homework for two hours. After that, I play the piano for an hour. Sometimes I take a walk with Dad. On weekends I usually help old people with my friends. What about your life? Share it with us, please. Question: Which of the following is NOT true? Yes or no, is the answer "Maria's life is boring and busy."?'''}],  add_special_tokens=False, return_tensors="pt")
+output_ids = model.generate(input_ids, eos=tokenizer.eos_token_id, max_new_tokens=128, temperature=0.7, top_k=5)
+print(f"generated output: {tokenizer.decode(output_ids, skip_special_tokens=False)}")                      
 ```
